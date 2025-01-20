@@ -2,13 +2,51 @@ import csv
 import socket
 import asyncio
 import threading
+import subprocess
+import platform
+import sqlite3
+import datetime
+
+from folium import plugins
 from ping3 import ping
+from geopy.geocoders import Nominatim
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import folium
+import webbrowser
+
 from ping3.errors import PingError
 
+# Конфигурация геолокатора
+geolocator = Nominatim(user_agent="dns_ping_tool")
+
+# Функция для создания таблицы, если она не существует
+def initialize_db():
+    conn = sqlite3.connect('ping_history.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS ping_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT,
+            dns TEXT,
+            ip TEXT,
+            min_ping REAL,
+            avg_ping REAL,
+            max_ping REAL,
+            packet_loss REAL,
+            jitter REAL,
+            traceroute TEXT,
+            location TEXT,
+            error TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+# Инициализация базы данных
+initialize_db()
 
 def is_ipv6_address(address):
     """Проверяет, является ли адрес IPv6."""
@@ -21,7 +59,6 @@ def is_ipv6_address(address):
 def supports_ipv6():
     """Проверяет, поддерживает ли система IPv6."""
     try:
-        # Попытка создать IPv6-сокет и подключиться к известному адресу
         sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
         sock.settimeout(2)
         sock.connect(("google.com", 80))
@@ -29,6 +66,38 @@ def supports_ipv6():
         return True
     except OSError:
         return False
+
+def traceroute_host(ip, max_hops=30, timeout=2):
+    """
+    Выполняет traceroute до указанного IP-адреса.
+
+    :param ip: IP-адрес назначения.
+    :param max_hops: Максимальное количество прыжков.
+    :param timeout: Таймаут для каждого запроса.
+    :return: Строка с результатами traceroute.
+    """
+    system = platform.system()
+    traceroute_result = ""
+    try:
+        if system == "Windows":
+            cmd = ["tracert", "-d", ip]
+        elif system in ("Linux", "Darwin"):
+            cmd = ["traceroute", "-n", ip]
+        else:
+            return "Unsupported OS for traceroute."
+
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        stdout, stderr = proc.communicate(timeout=60)
+        if proc.returncode == 0:
+            traceroute_result = stdout
+        else:
+            traceroute_result = stderr
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        traceroute_result = "Traceroute timed out."
+    except Exception as e:
+        traceroute_result = f"Traceroute failed: {e}"
+    return traceroute_result
 
 def ping_host(name, ip, count=10, timeout=2):
     """
@@ -38,7 +107,7 @@ def ping_host(name, ip, count=10, timeout=2):
     :param ip: IP-адрес сервера.
     :param count: Количество попыток пинга.
     :param timeout: Таймаут для каждого пинга в секундах.
-    :return: Словарь со статистикой пинга.
+    :return: Словарь со статистикой пинга и traceroute.
     """
     min_time = None
     max_time = None
@@ -86,22 +155,54 @@ def ping_host(name, ip, count=10, timeout=2):
         max_time = None
         avg_jitter = None
 
+    # Выполнение traceroute
+    traceroute_result = traceroute_host(ip)
+
+    # Геолокация сервера
+    try:
+        location = geolocator.geocode(ip, timeout=10)
+        if location:
+            latitude = location.latitude
+            longitude = location.longitude
+            geo_info = f"{location.address} (Lat: {latitude}, Lon: {longitude})"
+        else:
+            geo_info = "Unknown Location"
+    except Exception:
+        geo_info = "Geolocation Failed"
+
+    # Сохранение результатов в базу данных (отдельное соединение)
+    try:
+        conn = sqlite3.connect('ping_history.db')
+        cursor = conn.cursor()
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute('''
+            INSERT INTO ping_results (timestamp, dns, ip, min_ping, avg_ping, max_ping, packet_loss, jitter, traceroute, location, error)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (timestamp, name, ip, min_time, avg_time, max_time, packet_loss_percent, avg_jitter, traceroute_result, geo_info, 'None' if received_pings > 0 else 'All pings failed.'))
+        conn.commit()
+    except Exception as e:
+        print(f"Ошибка при сохранении результатов в базу данных: {e}")
+    finally:
+        conn.close()
+
     return {
         'DNS': name,
         'IP': ip,
+        'Location': geo_info,
         'Min Ping (ms)': f"{min_time:.2f}" if min_time is not None else 'N/A',
         'Avg Ping (ms)': f"{avg_time:.2f}" if avg_time is not None else 'N/A',
         'Max Ping (ms)': f"{max_time:.2f}" if max_time is not None else 'N/A',
         'Packet Loss (%)': f"{packet_loss_percent:.2f}",
         'Jitter (ms)': f"{avg_jitter:.2f}" if avg_jitter is not None else 'N/A',
+        'Traceroute': traceroute_result,
         'Error': 'None' if received_pings > 0 else 'All pings failed.'
     }
 
 class PingApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Game Server Ping Tool")
-        self.root.geometry("1200x800")
+        self.root.title("Game DNS Ping Tool")
+        self.root.geometry("1400x900")
 
         # Параметры пинга
         self.ping_count = tk.IntVar(value=10)
@@ -122,8 +223,11 @@ class PingApp:
             "OpenDNS (2)": "208.67.220.220",
             "Yandex": "77.88.8.8",
             "Yandex (2)": "77.88.8.1",
-            # Добавьте другие сервера или игровые серверы здесь
+            # Добавьте другие серверы или игровые серверы здесь
         }
+
+        # Поддержка IPv6
+        self.ipv6_supported = supports_ipv6()
 
     def create_widgets(self):
         # Параметры пинга
@@ -155,17 +259,20 @@ class PingApp:
         self.save_button = ttk.Button(buttons_frame, text="Сохранить результаты", command=self.save_results, state='disabled')
         self.save_button.pack(side="left", padx=5)
 
+        self.auto_select_button = ttk.Button(buttons_frame, text="Авто-выбор лучшего DNS", command=self.auto_select_dns, state='disabled')
+        self.auto_select_button.pack(side="left", padx=5)
+
         # Прогрессбар
         self.progress = ttk.Progressbar(self.root, orient='horizontal', mode='determinate')
         self.progress.pack(fill="x", padx=10, pady=5)
 
         # Таблица результатов
-        columns = ('DNS', 'IP', 'Min Ping (ms)', 'Avg Ping (ms)', 'Max Ping (ms)', 'Packet Loss (%)', 'Jitter (ms)', 'Error')
+        columns = ('DNS', 'IP', 'Location', 'Min Ping (ms)', 'Avg Ping (ms)', 'Max Ping (ms)', 'Packet Loss (%)', 'Jitter (ms)', 'Error')
         self.tree = ttk.Treeview(self.root, columns=columns, show='headings')
         for col in columns:
             self.tree.heading(col, text=col)
-            if col == 'DNS' or col == 'IP':
-                self.tree.column(col, width=150, anchor='center')
+            if col in ['DNS', 'IP', 'Location']:
+                self.tree.column(col, width=200, anchor='center')
             else:
                 self.tree.column(col, width=100, anchor='center')
         self.tree.pack(fill="both", expand=True, padx=10, pady=5)
@@ -173,6 +280,10 @@ class PingApp:
         # Кнопка для отображения графика
         self.plot_button = ttk.Button(self.root, text="Показать график", command=self.show_plot, state='disabled')
         self.plot_button.pack(pady=5)
+
+        # Кнопка для отображения карты
+        self.map_button = ttk.Button(self.root, text="Показать карту серверов", command=self.show_map, state='disabled')
+        self.map_button.pack(pady=5)
 
     def add_server(self):
         """Позволяет пользователю добавить новый сервер."""
@@ -210,7 +321,7 @@ class PingApp:
                         ip = row.get('IP')
                         if name and ip:
                             self.dns_servers[name] = ip
-                messagebox.showinfo("Загрузка", f"Сервера успешно загружены из '{file_path}'.")
+                messagebox.showinfo("Загрузка", f"Серверы успешно загружены из '{file_path}'.")
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Не удалось загрузить файл:\n{e}")
 
@@ -230,7 +341,7 @@ class PingApp:
                     writer.writeheader()
                     for name, ip in self.dns_servers.items():
                         writer.writerow({'DNS': name, 'IP': ip})
-                messagebox.showinfo("Сохранение", f"Сервера успешно сохранены в '{file_path}'.")
+                messagebox.showinfo("Сохранение", f"Серверы успешно сохранены в '{file_path}'.")
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Не удалось сохранить файл:\n{e}")
 
@@ -238,6 +349,8 @@ class PingApp:
         self.start_button.config(state='disabled')
         self.save_button.config(state='disabled')
         self.plot_button.config(state='disabled')
+        self.map_button.config(state='disabled')
+        self.auto_select_button.config(state='disabled')
         self.tree.delete(*self.tree.get_children())
         self.results = {}
         self.progress['value'] = 0
@@ -281,6 +394,8 @@ class PingApp:
         self.start_button.config(state='normal')
         self.save_button.config(state='normal')
         self.plot_button.config(state='normal')
+        self.map_button.config(state='normal')
+        self.auto_select_button.config(state='normal')
         messagebox.showinfo("Завершено", "Пинг завершен!")
 
     def populate_tree(self):
@@ -293,6 +408,7 @@ class PingApp:
             self.tree.insert('', tk.END, values=(
                 stats['DNS'],
                 stats['IP'],
+                stats['Location'],
                 stats['Min Ping (ms)'],
                 stats['Avg Ping (ms)'],
                 stats['Max Ping (ms)'],
@@ -324,12 +440,23 @@ class PingApp:
         if file_path:
             try:
                 with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
-                    fieldnames = ['DNS', 'IP', 'Min Ping (ms)', 'Avg Ping (ms)', 'Max Ping (ms)', 'Packet Loss (%)', 'Jitter (ms)', 'Error']
+                    fieldnames = ['DNS', 'IP', 'Location', 'Min Ping (ms)', 'Avg Ping (ms)', 'Max Ping (ms)', 'Packet Loss (%)', 'Jitter (ms)', 'Error', 'Traceroute']
                     writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
                     writer.writeheader()
                     for stats in self.results.values():
-                        writer.writerow(stats)
+                        writer.writerow({
+                            'DNS': stats['DNS'],
+                            'IP': stats['IP'],
+                            'Location': stats['Location'],
+                            'Min Ping (ms)': stats['Min Ping (ms)'],
+                            'Avg Ping (ms)': stats['Avg Ping (ms)'],
+                            'Max Ping (ms)': stats['Max Ping (ms)'],
+                            'Packet Loss (%)': stats['Packet Loss (%)'],
+                            'Jitter (ms)': stats['Jitter (ms)'],
+                            'Error': stats['Error'],
+                            'Traceroute': stats['Traceroute']
+                        })
                 messagebox.showinfo("Сохранение", f"Результаты успешно сохранены в '{file_path}'.")
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Не удалось сохранить файл:\n{e}")
@@ -343,20 +470,28 @@ class PingApp:
         plot_window = tk.Toplevel(self.root)
         plot_window.title("График задержек")
 
-        fig, ax = plt.subplots(figsize=(10, 6))
+        fig, ax = plt.subplots(figsize=(12, 8))
 
         names = []
         avg_pings = []
+        jitters = []
         for name, stats in self.results.items():
             avg_ping = float(stats['Avg Ping (ms)']) if stats['Avg Ping (ms)'] != 'N/A' else 0
+            jitter = float(stats['Jitter (ms)']) if stats['Jitter (ms)'] != 'N/A' else 0
             names.append(name)
             avg_pings.append(avg_ping)
+            jitters.append(jitter)
 
-        ax.bar(names, avg_pings, color='skyblue')
+        x = range(len(names))
+        ax.bar(x, avg_pings, width=0.4, label='Средний Ping (ms)', align='center')
+        ax.bar([i + 0.4 for i in x], jitters, width=0.4, label='Jitter (ms)', align='center')
+
         ax.set_xlabel('Серверы')
-        ax.set_ylabel('Средний Ping (ms)')
-        ax.set_title('Средний Ping по серверам')
-        ax.tick_params(axis='x', rotation=90)
+        ax.set_ylabel('Значения (ms)')
+        ax.set_title('Средний Ping и Jitter по серверам')
+        ax.set_xticks([i + 0.2 for i in x])
+        ax.set_xticklabels(names, rotation=90)
+        ax.legend()
         ax.grid(axis='y', linestyle='--', alpha=0.7)
         plt.tight_layout()
 
@@ -364,33 +499,117 @@ class PingApp:
         canvas.draw()
         canvas.get_tk_widget().pack(fill='both', expand=True)
 
-    def load_servers_from_file(self, filepath):
-        """Загружает список серверов из CSV-файла."""
-        try:
-            with open(filepath, 'r', newline='', encoding='utf-8') as csvfile:
-                reader = csv.DictReader(csvfile)
-                for row in reader:
-                    name = row.get('DNS')
-                    ip = row.get('IP')
-                    if name and ip:
-                        self.dns_servers[name] = ip
-            messagebox.showinfo("Загрузка", f"Сервера загружены из '{filepath}'.")
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось загрузить файл:\n{e}")
+    def show_map(self):
+        if not self.results:
+            messagebox.showwarning("Карта", "Нет данных для отображения карты.")
+            return
 
-    def save_servers_to_file(self, filepath):
-        """Сохраняет список серверов в CSV-файл."""
-        try:
-            with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
-                fieldnames = ['DNS', 'IP']
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        # Создание карты
+        map_center = [20, 0]  # Центр карты
+        m = folium.Map(location=map_center, zoom_start=2)
 
-                writer.writeheader()
-                for name, ip in self.dns_servers.items():
-                    writer.writerow({'DNS': name, 'IP': ip})
-            messagebox.showinfo("Сохранение", f"Сервера сохранены в '{filepath}'.")
+        for stats in self.results.values():
+            try:
+                # Использование геолокации
+                if "Unknown" in stats['Location'] or "Failed" in stats['Location']:
+                    continue
+                # Извлечение координат из строки геолокации
+                parts = stats['Location'].split("Lat:")
+                if len(parts) < 2:
+                    continue
+                lat_lon = parts[1].split("),")
+                if len(lat_lon) < 1:
+                    continue
+                lat = float(lat_lon[0].strip())
+                lon = float(lat_lon[1].replace("Lon:", "").strip().rstrip(')'))
+                folium.Marker(
+                    [lat, lon],
+                    popup=f"{stats['DNS']} ({stats['IP']})\nPing: {stats['Avg Ping (ms)']} ms",
+                    tooltip=stats['DNS']
+                ).add_to(m)
+            except Exception:
+                continue
+
+        # Добавление плагина для кластеризации маркеров
+        plugins.MarkerCluster().add_to(m)
+
+        # Сохранение карты во временный HTML-файл
+        map_file = "server_map.html"
+        m.save(map_file)
+
+        # Отображение карты в веб-браузере
+        webbrowser.open(map_file)
+
+    def auto_select_dns(self):
+        if not self.results:
+            messagebox.showwarning("Авто-выбор", "Нет результатов для анализа.")
+            return
+
+        # Найти сервер с минимальным средним ping и минимальным jitter
+        best_dns = None
+        min_ping = float('inf')
+        min_jitter = float('inf')
+
+        for stats in self.results.values():
+            if stats['Avg Ping (ms)'] != 'N/A' and stats['Jitter (ms)'] != 'N/A':
+                avg_ping = float(stats['Avg Ping (ms)'])
+                jitter = float(stats['Jitter (ms)'])
+                if avg_ping < min_ping or (avg_ping == min_ping and jitter < min_jitter):
+                    min_ping = avg_ping
+                    min_jitter = jitter
+                    best_dns = stats
+
+        if best_dns:
+            confirm = messagebox.askyesno("Авто-выбор",
+                                          f"Лучший сервер: {best_dns['DNS']} ({best_dns['IP']})\n"
+                                          f"Средний пинг: {best_dns['Avg Ping (ms)']} ms\n"
+                                          f"Jitter: {best_dns['Jitter (ms)']} ms\n"
+                                          f"Потери пакетов: {best_dns['Packet Loss (%)']}%\n\n"
+                                          f"Хотите использовать этот DNS-сервер?")
+            if confirm:
+                self.set_system_dns(best_dns['IP'])
+        else:
+            messagebox.showwarning("Авто-выбор", "Не удалось определить лучший сервер.")
+
+    def set_system_dns(self, dns_ip):
+        try:
+            system = platform.system()
+            if system == "Windows":
+                # Получение имени сетевого подключения
+                output = subprocess.check_output("netsh interface show interface", shell=True).decode()
+                lines = output.splitlines()
+                connection_name = None
+                for line in lines:
+                    if "Connected" in line:
+                        parts = line.split()
+                        # Имя подключения может содержать пробелы
+                        connection_name = ' '.join(parts[3:])
+                        break
+                if not connection_name:
+                    messagebox.showerror("Ошибка", "Не удалось определить активное сетевое подключение.")
+                    return
+
+                # Установка DNS
+                cmd = f"netsh interface ip set dns name=\"{connection_name}\" static {dns_ip}"
+                subprocess.check_call(cmd, shell=True)
+                messagebox.showinfo("Успех", f"Системный DNS успешно изменен на {dns_ip}.")
+            elif system == "Linux":
+                # Реализация для Linux (пример для систем с NetworkManager)
+                # Требует прав администратора
+                messagebox.showinfo("Информация", "Автоматическое изменение DNS для Linux требует настройки вручную.")
+            elif system == "Darwin":
+                # Реализация для macOS
+                # Требует прав администратора
+                # Пример для Wi-Fi интерфейса
+                cmd = f"networksetup -setdnsservers Wi-Fi {dns_ip}"
+                subprocess.check_call(cmd, shell=True)
+                messagebox.showinfo("Успех", f"Системный DNS успешно изменен на {dns_ip}.")
+            else:
+                messagebox.showerror("Ошибка", f"Неподдерживаемая ОС: {system}")
+        except subprocess.CalledProcessError as e:
+            messagebox.showerror("Ошибка", f"Не удалось изменить DNS:\n{e}")
         except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось сохранить файл:\n{e}")
+            messagebox.showerror("Ошибка", f"Произошла ошибка:\n{e}")
 
 def main():
     root = tk.Tk()
