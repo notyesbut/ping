@@ -213,16 +213,118 @@ class PingApp:
 
         # Список серверов (предустановленные и пользовательские)
         self.dns_servers = {
-            "Google": "8.8.8.8",
-            "Google (2)": "8.8.4.4",
-            "Cloudflare": "1.1.1.1",
-            "Cloudflare (2)": "1.0.0.1",
-            "Quad9": "9.9.9.9",
-            "Quad9 (2)": "149.112.112.112",
-            "OpenDNS": "208.67.222.222",
-            "OpenDNS (2)": "208.67.220.220",
-            "Yandex": "77.88.8.8",
-            "Yandex (2)": "77.88.8.1",
+        "Google": "8.8.8.8",
+        "Google (2)": "8.8.4.4",
+        "Google (IPv6)": "2001:4860:4860::8888",
+        "Google (IPv6 2)": "2001:4860:4860::8844",
+
+        "Cloudflare": "1.1.1.1",
+        "Cloudflare (2)": "1.0.0.1",
+        "Cloudflare (IPv6)": "2606:4700:4700::1111",
+        "Cloudflare (IPv6 2)": "2606:4700:4700::1001",
+
+        "Quad9": "9.9.9.9",
+        "Quad9 (2)": "149.112.112.112",
+        "Quad9 (IPv6)": "2620:fe::fe",
+        "Quad9 (IPv6 2)": "2620:fe::9",
+
+        "OpenDNS": "208.67.222.222",
+        "OpenDNS (2)": "208.67.220.220",
+        "OpenDNS FamilyShield": "208.67.222.123",
+        "OpenDNS FamilyShield (2)": "208.67.220.123",
+        "OpenDNS (IPv6)": "2620:0:ccc::2",
+        "OpenDNS (IPv6 2)": "2620:0:ccd::2",
+
+        "Yandex": "77.88.8.8",
+        "Yandex (2)": "77.88.8.1",
+        "Yandex (IPv6)": "2a02:6b8::feed:0ff",
+        "Yandex (IPv6 2)": "2a02:6b8::feed:0ff",
+
+        "Level3": "4.2.2.2",
+        "Level3 (2)": "4.2.2.1",
+        "Level3 (IPv6)": "2001:4860:4860::8844",
+        "Level3 (IPv6 2)": "2001:4860:4860::8888",
+
+        "Comodo Secure DNS": "8.26.56.26",
+        "Comodo Secure DNS (2)": "8.20.247.20",
+        "Comodo Secure DNS (IPv6)": "2001:41d0:2::5",
+        "Comodo Secure DNS (IPv6 2)": "2001:41d0:2::6",
+
+        "AdGuard DNS": "94.140.14.14",
+        "AdGuard DNS (2)": "94.140.15.15",
+        "AdGuard DNS Family": "94.140.14.15",
+        "AdGuard DNS Family (2)": "94.140.15.16",
+        "AdGuard DNS (IPv6)": "2a10:50c0::ad1:ff",
+        "AdGuard DNS (IPv6 2)": "2a10:50c0::ad2:ff",
+
+        "Neustar DNS": "156.154.70.1",
+        "Neustar DNS (2)": "156.154.71.1",
+        "Neustar DNS (IPv6)": "2620:74:1b::1:1",
+        "Neustar DNS (IPv6 2)": "2620:74:1c::1:1",
+
+        "DNS.WATCH": "84.200.69.80",
+        "DNS.WATCH (2)": "84.200.70.40",
+        "DNS.WATCH (IPv6)": "2001:1608:10:25::1c04:b12f",
+        "DNS.WATCH (IPv6 2)": "2001:1608:10:25::9249:d69b",
+
+        "CleanBrowsing": "185.228.168.9",
+        "CleanBrowsing (2)": "185.228.169.9",
+        "CleanBrowsing Family": "185.228.168.10",
+        "CleanBrowsing Family (2)": "185.228.169.11",
+        "CleanBrowsing Adult": "185.228.168.10",
+        "CleanBrowsing Adult (2)": "185.228.169.11",
+        "CleanBrowsing (IPv6)": "2a0d:2a00:1::",
+        "CleanBrowsing (IPv6 2)": "2a0d:2a00:2::",
+
+        "FreeDNS": "37.235.1.174",
+        "FreeDNS (2)": "37.235.1.177",
+        "FreeDNS (IPv6)": "2a10:50c0::ad1:ff",
+        "FreeDNS (IPv6 2)": "2a10:50c0::ad2:ff",
+
+        "Freenom World": "80.80.80.80",
+        "Freenom World (2)": "80.80.81.81",
+        "Freenom World (IPv6)": "2001:67c:28e8::",
+        "Freenom World (IPv6 2)": "2001:67c:28e9::",
+
+        "OpenNIC": "185.121.177.177",
+        "OpenNIC (2)": "169.239.202.202",
+        "OpenNIC (IPv6)": "2001:470:20::2",
+        "OpenNIC (IPv6 2)": "2001:470:20::1",
+
+        "UncensoredDNS": "91.239.100.100",
+        "UncensoredDNS (2)": "89.233.43.71",
+        "UncensoredDNS (IPv6)": "2001:67c:28e8::",
+        "UncensoredDNS (IPv6 2)": "2001:67c:28e9::",
+
+        "Dyn (Oracle)": "216.146.35.35",
+        "Dyn (Oracle) (2)": "216.146.36.36",
+        "Dyn (Oracle) (IPv6)": "2620:0:ccc::2:2",
+        "Dyn (Oracle) (IPv6 2)": "2620:0:ccd::2:2",
+
+        "Alternate DNS": "198.101.242.72",
+        "Alternate DNS (2)": "23.253.163.53",
+        "Alternate DNS (IPv6)": "2001:19f0:fe::1",
+        "Alternate DNS (IPv6 2)": "2001:19f0:fe::2",
+
+        "SafeDNS": "195.46.39.39",
+        "SafeDNS (2)": "195.46.39.40",
+        "SafeDNS (IPv6)": "2001:4860:4860::8888",
+        "SafeDNS (IPv6 2)": "2001:4860:4860::8844",
+
+        "Verisign": "64.6.64.6",
+        "Verisign (2)": "64.6.65.6",
+        "Verisign (IPv6)": "2620:74:1b::1:1",
+        "Verisign (IPv6 2)": "2620:74:1c::1:1",
+
+        "IBM Quad9": "9.9.9.10",
+        "IBM Quad9 (2)": "149.112.112.10",
+        "IBM Quad9 (IPv6)": "2620:fe::10",
+        "IBM Quad9 (IPv6 2)": "2620:fe::fe10",
+
+        "NextDNS": "45.90.28.0",
+        "NextDNS (2)": "45.90.30.0",
+        "NextDNS (IPv6)": "2a07:a8c0::",
+        "NextDNS (IPv6 2)": "2a07:a8c1::",
             # Добавьте другие серверы или игровые серверы здесь
         }
 
