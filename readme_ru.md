@@ -46,8 +46,7 @@ pip install ping3 matplotlib geopy folium
 ### Шаг 1: Загрузка
 1. Склонируйте репозиторий через `git`:
    ```bash
-   git clone https://github.com/your-repo-url
-   cd your-repo-folder
+   git clone https://github.com/repo  (Скопируйте репозиторий)
    ```
 2. Либо загрузите `.zip` файл и распакуйте его.
 
